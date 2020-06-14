@@ -4,5 +4,5 @@ from __future__ import unicode_literals
 from django.apps import AppConfig
 
 
-class PollsConfig(AppConfig):
-    name = 'polls'
+class ExternalAccountConfig(AppConfig):
+    name = 'external-accounts'
