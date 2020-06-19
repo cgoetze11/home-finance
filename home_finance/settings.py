@@ -37,7 +37,9 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'home_finance.components.external_account'
+    'home_finance.components.external_account',
+    'home_finance.components.category',
+    'home_finance.components.transaction'
 ]
 
 MIDDLEWARE = [
