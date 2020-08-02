@@ -8,7 +8,7 @@ class Transaction(models.Model):
     """
 
     account = models.ForeignKey(ExternalAccount, on_delete=models.CASCADE)
-    parent = models.ForeignKey('self', null=True, blank=True, related_name='subtransactions')
+    parent = models.ForeignKey('self', on_delete=models.DO_NOTHING, null=True, blank=True, related_name='subtransactions')
     description = models.CharField(max_length=200)
     amount = models.FloatField()
     date = models.DateTimeField()

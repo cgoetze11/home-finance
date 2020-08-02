@@ -9,5 +9,5 @@ class Category(models.Model):
 
     name = models.CharField(max_length=100)
     description = models.CharField(max_length=100, blank=True, null=True)
-    parent = models.ForeignKey('self', null=True, blank=True, related_name='subcategories')
+    parent = models.ForeignKey('self', on_delete=models.DO_NOTHING, null=True, blank=True, related_name='subcategories')
     transactions = models.ManyToManyField(Transaction, blank=True, null=True)
