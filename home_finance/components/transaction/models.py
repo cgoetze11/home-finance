@@ -13,6 +13,7 @@ class Transaction(models.Model):
     description = models.CharField(max_length=200)
     amount = models.FloatField()
     date = models.DateTimeField()
+    num = models.IntegerField(null=True, help_text='Used to record check numbers')
     notes = models.CharField(max_length=200, blank=True, null=True)
     transfer_account = models.ForeignKey('self', on_delete=models.DO_NOTHING, null=True)
     reconciled = models.BooleanField(default=False)
