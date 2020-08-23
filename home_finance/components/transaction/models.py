@@ -14,7 +14,7 @@ class Transaction(models.Model):
     amount = models.FloatField()
     date = models.DateTimeField()
     notes = models.CharField(max_length=200, blank=True, null=True)
-    transfer = models.BooleanField(default=False)
+    transfer_account = models.ForeignKey('self', on_delete=models.DO_NOTHING, null=True)
     reconciled = models.BooleanField(default=False)
     ''' A transaction with no category means it should have children transactions--so it represents a split.
         In this case, the amount is the summary amount of the splits, so it represents the entire transaction amount.
