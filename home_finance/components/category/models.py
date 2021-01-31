@@ -14,6 +14,28 @@ class Category(models.Model):
     parent = models.ForeignKey('self', on_delete=models.DO_NOTHING, null=True, blank=True, related_name='subcategories')
 
 
+def create_from_name(name):
+    """
+    Note that the category name may contain a colon, in which case it is considered a nested category,
+    and the method will ensure the parent is correctly created and linked to the child.
+    """
+    name_pattern = re.compile(r'(.*):\s+\d+')
+    match = name_pattern.match(name)
+    if match:
+        category_name = match.group(1)
+        ancestor_lineage = None
+        for parent_name in category_name.split(':'):
+            new_name = parent_name if ancestor_lineage is None else f'{ancestor_lineage.name}:{parent_name}'
+            parent_category = Category.objects.filter(name=new_name).all()
+            if not parent_category:
+                c = Category(name=new_name, parent=ancestor_lineage)
+                c.save()
+                ancestor_lineage = c
+            else:
+                ancestor_lineage = parent_category[0]
+    return Category.objects.filter(name=name).all()[0]
+
+
 def create_from_file(file_name):
     """
     Create some Category entries from an input file
@@ -21,24 +43,13 @@ def create_from_file(file_name):
     The file expects one category per line and the format should be:
     <category name>:  <number>
     Note that the category name may contain a colon, in which case it is considered a nested category,
-    and the method with ensure the parent is correctly created and linked to the child.
+    and the method will ensure the parent is correctly created and linked to the child.
     """
     name_pattern = re.compile(r'(.*):\s+\d+')
     with open(file_name) as f:
         for line in f:
             match = name_pattern.match(line)
             if match:
-                category_name = match.group(1)
-                ancestor_lineage = None
-                for parent_name in category_name.split(':'):
-                    new_name = parent_name if ancestor_lineage is None else f'{ancestor_lineage.name}:{parent_name}'
-                    parent_category = Category.objects.filter(name=new_name).all()
-                    if not parent_category:
-                        c = Category(name=new_name, parent=ancestor_lineage)
-                        c.save()
-                        ancestor_lineage = c
-                    else:
-                        ancestor_lineage = parent_category[0]
+                create_from_name(line)
             else:
                 print(f'Failed to extract category from line: <{line}>')
-
