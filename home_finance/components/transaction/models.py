@@ -69,9 +69,10 @@ def load_from_file(to_account: external_account.ExternalAccount, file_name: str)
             Transaction.objects.bulk_create(splits)
 
 
-def findTransactions(to_account: external_account.ExternalAccount, data: dict):
+def findTransactions(to_account: external_account.ExternalAccount, data: dict, ignore_pks: set = set()):
     """
     Find possible matching transactions, but include new possible transaction in case it doesn't match
+    If the ignore_pks is provided, those value should excluded from being considered matches.
     """
     candidate = createTransaction(to_account, data)
     if candidate.num:
@@ -83,6 +84,8 @@ def findTransactions(to_account: external_account.ExternalAccount, data: dict):
                                                      date__gt=candidate.date - datetime.timedelta(days=7),
                                                      date__lt=candidate.date + datetime.timedelta(days=7),
                                                      account=to_account)
+    if ignore_pks:
+        possible_filter = possible_filter.exclude(id__in=ignore_pks)
     return candidate, possible_filter.all()
 
 def createTransaction(to_account: external_account.ExternalAccount, data: dict):

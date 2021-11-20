@@ -1,3 +1,4 @@
+from colored import fg, bg, stylize
 from datetime import datetime
 import json
 from django.db.models import Sum
@@ -8,49 +9,65 @@ from home_finance.components.external_account.models import ExternalAccount
 from home_finance.components.transaction.models import Transaction, findTransactions
 
 def current_balance(account: ExternalAccount):
-    print(f'Current balance on account {account.name} is:\t\t\t\t {current_account_balance(account)}')
+    print(f'Current balance on account {account.name} is:\t\t\t\t {amount_style(current_account_balance(account, as_string=False))}')
 
 def load_transactions(to_account: ExternalAccount, filename: str):
     """
     Interactively walk through each provided transaction and help the user decide on the action to take.
+
+    TODO:
+    Now there is a transaction_id field that can be used to know 2 similar entries during a since file processing
+    run are not the same. When two of same amounts for the same description occur, often times the "findTransactions"
+    finds a single one both times and so one of them is ignored.
+
+    Idea: keep track of transaction_id and which ones were processed, so if/when you see (in the input file) a similar
+    transaction, know that it should *not* match the previous one. A challenge is that the findTransactions does not
+    know the transaction_id (and it should not store it since institutions (like CitiBank) change the id values from
+    download to download (seems they stabilize on final statement, but for pre-finalized statements they vary).
     """
     with open(filename) as f:
         transactions = json.load(f)
 
     print(f'Found {len(transactions)} in the file: {filename}')
     # tell user the balance after before we start
-    print(f'Starting balance on account {to_account.name} is:\t\t\t\t {current_account_balance(to_account)}')
+    print(f'Starting balance on account {to_account.name} is:\t\t\t\t {amount_style(current_account_balance(to_account, as_string=False))}')
 
+    matched_pks = set()
     for txn in transactions:
-        (candidate, possibles) = findTransactions(to_account, txn)
+        (candidate, possibles) = findTransactions(to_account, txn, matched_pks)
         if len(possibles) > 0:
-            print(f'Possible matches of: {candidate.date:%Y-%m-%d(%a)}: {candidate.amount}, {candidate.description}')
+            print(f'Possible matches of: {date_style(candidate.date)}: {amount_style(candidate.amount)}, {candidate.description}')
             for i, possible in enumerate(possibles):
-                print(f'\t{i}: {possible.date:%Y-%m-%d(%a)}: {possible.amount}, {possible.description}\n'
+                print(f'\t{i}: {date_style(possible.date)}: {possible.amount}, {possible.description}\n'
                       f'\t\tCategory: {possible.category.name if possible.category else "None"},'
                       f'\t\tTransfer account: {possible.transfer_account.name if possible.transfer_account else "None"},'
                       f'\t\tReconciled: {possible.reconciled}')
             if len(possibles) == 1 and possibles[0].reconciled:
                 print(f'Above transaction was found and is reconciled, so no action being provided.')
+                matched_pks.add(possibles[0].id)
             else:
                 handled = False
                 while not handled:
                     prompt_input = input(f'If this transaction appears above and you are happy with it, input "s".'
-                                         f'To reconcile a transaction from the list type: "r<num>".')
+                                         f'To reconcile or ignore a transaction from the list type: "r<num>" or "i<num>".')
                     if prompt_input.startswith('s'):
-                        print(f'Skipping transaction: {candidate.date:%Y-%m-%d(%a)}: {candidate.amount}, {candidate.description}')
+                        print(f'Skipping transaction: {date_style(candidate.date)}: {amount_style(candidate.amount)}, {candidate.description}')
                         handled = True
-                    if prompt_input.startswith('r'):
+                    if prompt_input.startswith('r') or prompt_input.startswith('i'):
                         transaction_index = int(prompt_input[1:])
                         if transaction_index < 0 or transaction_index >= len(possibles):
-                            print(f'Cannot reconcile item number: {transaction_index} since it is outside of the range')
+                            print(f'Cannot reconcile or ignore item number: {transaction_index} since it is outside of the range')
                         else:
-                            possibles[transaction_index].reconciled = True
-                            possibles[transaction_index].save()
-                            print(f'Reconciled transaction.')
+                            if prompt_input.startswith('r'):
+                                possibles[transaction_index].reconciled = True
+                                possibles[transaction_index].save()
+                                print(f'Reconciled transaction.')
+                            else:
+                                print(f'Ignored transaction.')
                             handled = True
+                            matched_pks.add(possibles[transaction_index].id)
         else:
-            print(f'No matching transactions found. {candidate.date:%Y-%m-%d(%a)}: {candidate.amount}, {candidate.description}')
+            print(f'No matching transactions found. {date_style(candidate.date)}: {amount_style(candidate.amount)}, {candidate.description}')
             add_new = input(f'Input "n" to create a new one or anything else to skip.')
             if add_new == 'n' or add_new == 'N':
                 category, transfer_account = prompt_for_category_or_transfer_account()
@@ -65,7 +82,8 @@ def load_transactions(to_account: ExternalAccount, filename: str):
                 if len(new_notes) > 1:
                     candidate.notes = new_notes
                 candidate.save()
-                print(f'New balance on account {candidate.account.name} is:\t\t\t\t {current_account_balance(candidate.account)}')
+                matched_pks.add(candidate.id)
+                print(f'New balance on account {candidate.account.name} is:\t\t\t\t {amount_style(current_account_balance(candidate.account, as_string=False))}')
             else:
                 print(f'Ignoring transaction')
 
@@ -99,7 +117,7 @@ def new_transaction(transaction_date: str, amount: float, description: str, note
     if transfer_transaction:
         transfer_transaction.save()
     # tell user the balance after this transaction has been saved
-    print(f'New balance on account {transaction.account.name} is:\t\t\t\t {current_account_balance(transaction.account)}')
+    print(f'New balance on account {transaction.account.name} is:\t\t\t\t {amount_style(current_account_balance(transaction.account, as_string=False))}')
         
 
 def prompt_for_category_or_transfer_account():
@@ -174,8 +192,23 @@ def recent_transactions(account: ExternalAccount, count=10):
     balance = current_account_balance(account, as_string=False)
     txns = Transaction.objects.filter(account=account).order_by('-date')[:count]
     for txn in txns:
-        print(f'{txn.date:%Y-%m-%d(%a)}: {txn.num if txn.num else "    "} {moneyfmt(balance)} {txn.amount}, {txn.description}, {txn.notes}\n'
+        print(f'{date_style(txn.date)}: {txn.num if txn.num else "    "} {money_style(balance)} {txn.amount}, {txn.description}, {txn.notes}\n'
               f'\tCategory: {txn.category.name if txn.category else "None"},'
               f'\tTransfer account: {txn.transfer_account.name if txn.transfer_account else "None"},'
               f'\tReconciled: {txn.reconciled}')
         balance = balance - txn.amount
+
+
+def money_style(amount):
+    if amount < 0:
+        return stylize(moneyfmt(amount), bg("red"), fg("black"))
+    return stylize(moneyfmt(amount), bg("green"), fg("white"))
+
+
+def amount_style(amount):
+    if amount < 0.0:
+        return stylize(amount, bg("red"), fg("black"))
+    return stylize(amount, bg("green"), fg("white"))
+
+def date_style(d):
+    return stylize(f'{d:%Y-%m-%d(%a)}', bg("blue"), fg("white"))
