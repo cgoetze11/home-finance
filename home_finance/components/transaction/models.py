@@ -1,6 +1,8 @@
 import datetime
 import json
 from django.db import models
+from django.db.models import Q
+
 import home_finance.components.category.models as category
 import home_finance.components.external_account.models as external_account
 
@@ -67,6 +69,26 @@ def load_from_file(to_account: external_account.ExternalAccount, file_name: str)
             for split in splits:
                 split.parent = new_txn
             Transaction.objects.bulk_create(splits)
+
+
+def search_txn(input_query: str, num_results: int = 10):
+    """Search for transactions with the query string in the description or notes"""
+    query = Q(description__icontains=input_query) | Q(notes__icontains=input_query)
+    return Transaction.objects.filter(query).all().order_by('-date').order_by('-num').order_by('-id')[:num_results]
+
+
+def next_number(from_account: external_account.ExternalAccount):
+    """
+    Find the next suggested number to use for the provided account.
+    """
+    highest_num = sorted(Transaction.objects.filter(account=from_account, num__regex=r'^[0123456789]+$').all(), key=lambda o: int(o.num))[-1]
+    if highest_num:
+        try:
+            last_number = int(highest_num.num)
+            return f'{last_number + 1}'
+        except ValueError:
+            return ''
+
 
 
 def findTransactions(to_account: external_account.ExternalAccount, data: dict, ignore_pks: set = set()):

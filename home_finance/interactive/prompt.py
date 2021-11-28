@@ -6,7 +6,7 @@ from django.db.models.manager import Manager
 from .util import moneyfmt
 from home_finance.components.category.models import Category
 from home_finance.components.external_account.models import ExternalAccount
-from home_finance.components.transaction.models import Transaction, findTransactions
+from home_finance.components.transaction.models import Transaction, findTransactions, next_number, search_txn
 
 def current_balance(account: ExternalAccount):
     print(f'Current balance on account {account.name} is:\t\t\t\t {amount_style(current_account_balance(account, as_string=False))}')
@@ -176,6 +176,98 @@ def prompt_by_name(object_name: str, objects: Manager):
     return item
 
 
+def search(input_query: str):
+    """
+    Search transactions
+    """
+    item = None
+    handled = False
+    possible_items = search_txn(input_query)
+    while not handled:
+        for i, possible in enumerate(possible_items):
+            print(
+                f'{i}: {date_style(possible.date)}: {possible.num if possible.num else "    "} {possible.amount}, {possible.description}, {possible.notes}\n'
+                f'\tCategory: {possible.category.name if possible.category else "None"},'
+                f'\tTransfer account: {possible.transfer_account.name if possible.transfer_account else "None"},'
+                f'\tReconciled: {possible.reconciled}')
+        select_item = input(f'Which transaction number do you want to select, or "none" to skip: ')
+        if select_item.upper() == 'NONE':
+            handled = True
+        else:
+            try:
+                select_index = int(select_item)
+                if select_index < 0 or select_index > len(possible_items):
+                    print(f'Input provided is out of range.')
+                else:
+                    item = possible_items[select_index]
+                    handled = True
+            except ValueError:
+                print(f'Failed to parse input as an integer.')
+    return item
+
+
+def new_from_search(input_query: str):
+    """
+    Search for transactions in order to create a new one from a search result
+    """
+    template = search(input_query)
+    if not template:
+        print('No matched transaction found to use as a template')
+        return
+    today = datetime.today()
+    t_date = datetime.strptime(f'{today:%Y-%m-%d}__12:00-+0800', f'%Y-%m-%d__%H:%M-%z')
+    transaction = Transaction(date=t_date, amount=template.amount, description=template.description,
+                              notes=template.notes, num='', account=template.account, category=template.category)
+    handled = False
+    if transaction.account and template.num:
+        transaction.num = next_number(transaction.account)
+    while not handled:
+        new_date = input(f'New date: {transaction.date:%Y-%m-%d}: ')
+        if new_date:
+            transaction.date = datetime.strptime(f'{new_date}__12:00-+0800', f'%Y-%m-%d__%H:%M-%z')
+        new_amount = input(f'New amount: {transaction.amount}: ')
+        if new_amount:
+            try:
+                transaction.amount = float(new_amount)
+            except ValueError:
+                print('Invalid amount, please try again.')
+                continue
+        new_description = input(f'New description: {transaction.description}: ')
+        if new_description:
+            transaction.description = new_description
+        new_notes = input(f'New notes: {transaction.notes}: ')
+        if new_notes:
+            transaction.notes = new_notes
+        new_number = input(f'New check number {transaction.num}: ')
+        if new_number:
+            transaction.num = new_number
+        accept_account = input(f'Keep account {transaction.account.name} [Y|n]:')
+        if accept_account and accept_account.startswith('n'):
+            new_account = prompt_for_account(False)
+            if new_account:
+                transaction.account = new_account
+        accept_category = input(f'Keep category {transaction.category.name} [Y|n]:')
+        if accept_category and accept_category.startswith('n'):
+            new_category = prompt_for_category(False)
+            if new_category:
+                transaction.category = new_category
+        reconciled = input(f'Make it reconciled [N|y]:')
+        if reconciled and reconciled.startswith('y'):
+            transaction.reconciled = True
+        accept = input(
+            f'Accept: {date_style(transaction.date)}: {transaction.num if transaction.num else "    "} {transaction.amount}, {transaction.description}, {transaction.notes}\n'
+            f'\tCategory: {transaction.category.name if transaction.category else "None"},'
+            f'\tAccount: {transaction.account.name if transaction.account else "None"},'
+            f'\tTransfer account: {transaction.transfer_account.name if transaction.transfer_account else "None"},'
+            f'\tReconciled: {transaction.reconciled}: [Y|n|q]')
+        if accept and accept.startswith('q'):
+            handled = True
+        elif not accept or (accept.startswith('Y') or accept.startswith('y')):
+            transaction.save()
+            print(f'New balance on account {transaction.account.name} is:\t\t\t\t {amount_style(current_account_balance(transaction.account, as_string=False))}')
+            handled = True
+
+
 def current_account_balance(account: ExternalAccount, as_string=True):
     """Get the current balance from the account as either a printable string or numeric
     TODO: support date argument to support ignoring future dates, so I can get today's current balance ignoring pending bills
@@ -190,7 +282,7 @@ def current_account_balance(account: ExternalAccount, as_string=True):
 def recent_transactions(account: ExternalAccount, count=10):
     """Print some of the most recent transactions from this account"""
     balance = current_account_balance(account, as_string=False)
-    txns = Transaction.objects.filter(account=account).order_by('-date')[:count]
+    txns = Transaction.objects.filter(account=account).order_by('-date').order_by('-num').order_by('-id')[:count]
     for txn in txns:
         print(f'{date_style(txn.date)}: {txn.num if txn.num else "    "} {money_style(balance)} {txn.amount}, {txn.description}, {txn.notes}\n'
               f'\tCategory: {txn.category.name if txn.category else "None"},'
