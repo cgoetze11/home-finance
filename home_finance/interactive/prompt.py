@@ -94,6 +94,7 @@ def load_transactions(to_account: ExternalAccount, filename: str):
                         if template:
                             new_txn = transaction_from_template(template, txn)
                             new_txn.account = to_account
+                            prompt_for_string_change(new_txn, 'notes')
                             new_txn.save()
                             handled_txn = True
                             matched_pks.add(new_txn.id)
