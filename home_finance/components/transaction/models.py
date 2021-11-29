@@ -74,7 +74,7 @@ def load_from_file(to_account: external_account.ExternalAccount, file_name: str)
 def search_txn(input_query: str, num_results: int = 10):
     """Search for transactions with the query string in the description or notes"""
     query = Q(description__icontains=input_query) | Q(notes__icontains=input_query)
-    return Transaction.objects.filter(query).all().order_by('-date').order_by('-num').order_by('-id')[:num_results]
+    return Transaction.objects.filter(query).all().order_by('-date', '-num', '-id')[:num_results]
 
 
 def next_number(from_account: external_account.ExternalAccount):
@@ -110,6 +110,7 @@ def findTransactions(to_account: external_account.ExternalAccount, data: dict, i
         possible_filter = possible_filter.exclude(id__in=ignore_pks)
     return candidate, possible_filter.all()
 
+
 def createTransaction(to_account: external_account.ExternalAccount, data: dict):
     """
     Create a top level transaction, ignoring the splits
@@ -135,6 +136,18 @@ def createTransaction(to_account: external_account.ExternalAccount, data: dict):
                        category=cat,
                        transfer_account=acct)
 
+
+def transaction_from_template(txn: Transaction, data: dict):
+    """Create and return a new transaction (not saved yet) based on the template and using the supplied data"""
+    return Transaction(amount=data['amount'],
+                       parent=None,
+                       account=txn.account,
+                       description=txn.description,
+                       date=datetime.datetime.strptime(f'{data["date"]}-12:00-+0800', '%Y-%m-%d-%H:%M-%z'),
+                       num=data.get('num'),
+                       notes=txn.notes,
+                       reconciled=True,
+                       category=txn.category)
 
 
 def _getUnique(cls, name: str):

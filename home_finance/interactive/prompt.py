@@ -6,7 +6,7 @@ from django.db.models.manager import Manager
 from .util import moneyfmt
 from home_finance.components.category.models import Category
 from home_finance.components.external_account.models import ExternalAccount
-from home_finance.components.transaction.models import Transaction, findTransactions, next_number, search_txn
+from home_finance.components.transaction.models import Transaction, findTransactions, next_number, search_txn, transaction_from_template
 
 def current_balance(account: ExternalAccount):
     print(f'Current balance on account {account.name} is:\t\t\t\t {amount_style(current_account_balance(account, as_string=False))}')
@@ -38,7 +38,7 @@ def load_transactions(to_account: ExternalAccount, filename: str):
         if len(possibles) > 0:
             print(f'Possible matches of: {date_style(candidate.date)}: {amount_style(candidate.amount)}, {candidate.description}')
             for i, possible in enumerate(possibles):
-                print(f'\t{i}: {date_style(possible.date)}: {possible.amount}, {possible.description}\n'
+                print(f'\t{i}: {date_style(possible.date)}: {possible.num if possible.num else "   "} {possible.amount}, {possible.description}\n'
                       f'\t\tCategory: {possible.category.name if possible.category else "None"},'
                       f'\t\tTransfer account: {possible.transfer_account.name if possible.transfer_account else "None"},'
                       f'\t\tReconciled: {possible.reconciled}')
@@ -67,25 +67,42 @@ def load_transactions(to_account: ExternalAccount, filename: str):
                             handled = True
                             matched_pks.add(possibles[transaction_index].id)
         else:
-            print(f'No matching transactions found. {date_style(candidate.date)}: {amount_style(candidate.amount)}, {candidate.description}')
-            add_new = input(f'Input "n" to create a new one or anything else to skip.')
-            if add_new == 'n' or add_new == 'N':
-                category, transfer_account = prompt_for_category_or_transfer_account()
-                candidate.category = category
-                candidate.transfer_account = transfer_account
-                cleared = input(f'This transaction will be set as reconciled, type: "no" to change that.')
-                candidate.reconciled = False if cleared.upper() == 'NO' else True
-                new_description = input(f'Type a new description (or just enter to skip): {candidate.description}')
-                if len(new_description) > 1:
-                    candidate.description = new_description
-                new_notes = input(f'Type notes to add, or enter to skip')
-                if len(new_notes) > 1:
-                    candidate.notes = new_notes
-                candidate.save()
-                matched_pks.add(candidate.id)
-                print(f'New balance on account {candidate.account.name} is:\t\t\t\t {amount_style(current_account_balance(candidate.account, as_string=False))}')
-            else:
-                print(f'Ignoring transaction')
+            handled_txn = False
+            while not handled_txn:
+                print(f'No matching transactions found. {date_style(candidate.date)}: {amount_style(candidate.amount)}, {candidate.description}')
+                add_new = input(f'Input "n" to create a new one from scratch, "s" to search for a template or anything else to skip.')
+                if add_new == 'n' or add_new == 'N':
+                    category, transfer_account = prompt_for_category_or_transfer_account()
+                    candidate.category = category
+                    candidate.transfer_account = transfer_account
+                    cleared = input(f'This transaction will be set as reconciled, type: "no" to change that.')
+                    candidate.reconciled = False if cleared.upper() == 'NO' else True
+                    new_description = input(f'Type a new description (or just enter to skip): {candidate.description}')
+                    if len(new_description) > 1:
+                        candidate.description = new_description
+                    new_notes = input(f'Type notes to add, or enter to skip')
+                    if len(new_notes) > 1:
+                        candidate.notes = new_notes
+                    candidate.save()
+                    handled_txn = True
+                    matched_pks.add(candidate.id)
+                    print(f'New balance on account {candidate.account.name} is:\t\t\t\t {amount_style(current_account_balance(candidate.account, as_string=False))}')
+                elif add_new == 's' or add_new == 'S':
+                    search_input = input(f'Search criteria for a template transaction: ')
+                    if len(search_input) > 2:
+                        template = search(search_input)
+                        if template:
+                            new_txn = transaction_from_template(template, txn)
+                            new_txn.account = to_account
+                            new_txn.save()
+                            handled_txn = True
+                            matched_pks.add(new_txn.id)
+                            print(f'New balance on account {new_txn.account.name} is:\t\t\t\t {amount_style(current_account_balance(new_txn.account, as_string=False))}')
+                    else:
+                        print('Please type more than 2 characters when searching for a template')
+                else:
+                    print(f'Ignoring transaction')
+                    handled_txn = True
 
 
 def new_transaction(transaction_date: str, amount: float, description: str, notes: str = None,
@@ -178,7 +195,7 @@ def prompt_by_name(object_name: str, objects: Manager):
 
 def search(input_query: str):
     """
-    Search transactions
+    Search transactions and return a candidate that was selected
     """
     item = None
     handled = False
@@ -232,15 +249,9 @@ def new_from_search(input_query: str):
             except ValueError:
                 print('Invalid amount, please try again.')
                 continue
-        new_description = input(f'New description: {transaction.description}: ')
-        if new_description:
-            transaction.description = new_description
-        new_notes = input(f'New notes: {transaction.notes}: ')
-        if new_notes:
-            transaction.notes = new_notes
-        new_number = input(f'New check number {transaction.num}: ')
-        if new_number:
-            transaction.num = new_number
+        prompt_for_string_change(transaction, 'description')
+        prompt_for_string_change(transaction, 'notes')
+        prompt_for_string_change(transaction, 'num')
         accept_account = input(f'Keep account {transaction.account.name} [Y|n]:')
         if accept_account and accept_account.startswith('n'):
             new_account = prompt_for_account(False)
@@ -268,6 +279,13 @@ def new_from_search(input_query: str):
             handled = True
 
 
+def prompt_for_string_change(transaction: Transaction, field_name: str):
+    """Prompt for potentially changing a field value"""
+    new_value = input(f'New {field_name}: ')
+    if new_value:
+        setattr(transaction, field_name, new_value)
+
+
 def current_account_balance(account: ExternalAccount, as_string=True):
     """Get the current balance from the account as either a printable string or numeric
     TODO: support date argument to support ignoring future dates, so I can get today's current balance ignoring pending bills
@@ -282,9 +300,9 @@ def current_account_balance(account: ExternalAccount, as_string=True):
 def recent_transactions(account: ExternalAccount, count=10):
     """Print some of the most recent transactions from this account"""
     balance = current_account_balance(account, as_string=False)
-    txns = Transaction.objects.filter(account=account).order_by('-date').order_by('-num').order_by('-id')[:count]
+    txns = Transaction.objects.filter(account=account).order_by('-date', '-num', '-id')[:count]
     for txn in txns:
-        print(f'{date_style(txn.date)}: {txn.num if txn.num else "    "} {money_style(balance)} {txn.amount}, {txn.description}, {txn.notes}\n'
+        print(f'{date_style(txn.date)}: {txn.num if txn.num else "    "} {money_style(balance)} {money_style(txn.amount)}, {txn.description}, {txn.notes}\n'
               f'\tCategory: {txn.category.name if txn.category else "None"},'
               f'\tTransfer account: {txn.transfer_account.name if txn.transfer_account else "None"},'
               f'\tReconciled: {txn.reconciled}')
